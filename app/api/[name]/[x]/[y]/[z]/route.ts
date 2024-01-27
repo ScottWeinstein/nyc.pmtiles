@@ -1,5 +1,4 @@
 // adapted from https://github.com/protomaps/PMTiles/blob/main/serverless/cloudflare/src/index.ts
-import fsp from 'fs/promises';
 import { PMTiles, Source, RangeResponse, ResolvedValueCache, TileType, Compression } from 'pmtiles';
 import { tile_path, tileJSON } from './pmtilesshared';
 
@@ -35,10 +34,19 @@ class HTTPSource implements Source {
   async getBytes(position: number, length: number): Promise<RangeResponse> {
     const headers = { Range: `bytes=${position}-${position + length - 1}` };
     const response = await fetch(this.url, { headers });
+    if (!response.ok || length !== Number(response.headers.get('content-length'))) {
+      console.log(
+        'fetched',
+        headers.Range,
+        position,
+        length,
+        response.status,
+        response.statusText,
+        response.headers.get('content-length'),
+        response.headers.get('content-range'),
+      );
+    }
     const data = await response.arrayBuffer();
-    // response.headers.forEach((v, k) => {
-    //   console.log(`${k}: ${v}`);
-    // });
     return { data, etag: response.headers.get('etag')!, cacheControl: response.headers.get('cache-control')! };
   }
 }
@@ -48,12 +56,11 @@ const p = new PMTiles(source, CACHE, nativeDecompress);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const { ok, name, tile, ext } = tile_path(url.pathname);
+  const tilePath = tile_path(url.pathname);
+  const { ok, name, tile, ext } = tilePath;
   if (!ok) {
     return new Response('Invalid URL', { status: 404 });
   }
-
-  // const cache = caches.default;
 
   const headers = {
     'Content-Type': 'application/json',
@@ -113,6 +120,7 @@ export async function GET(request: Request) {
     if (tiledata) {
       return new Response(tiledata.data, { headers, status: 200 });
     } else {
+      console.log('no tile data for', tilePath);
       return new Response(undefined, { headers, status: 204 });
     }
   } catch (e) {
